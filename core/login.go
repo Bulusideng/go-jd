@@ -34,17 +34,17 @@ func (jd *JingDong) validateLogin(URL string) bool {
 		return false
 	}
 
-	jd.client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+	jd.downloader.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		// disable redirect
 		return http.ErrUseLastResponse
 	}
 
 	defer func() {
 		// restore to default
-		jd.client.CheckRedirect = nil
+		jd.downloader.CheckRedirect = nil
 	}()
 
-	if resp, err = jd.client.Do(req); err != nil {
+	if resp, err = jd.downloader.Do(req); err != nil {
 		clog.Info("需要重新登录: %+v", err)
 		return false
 	}
@@ -77,7 +77,7 @@ func (jd *JingDong) loginPage(URL string) error {
 
 	applyCustomHeader(req, DefaultHeaders)
 
-	if resp, err = jd.client.Do(req); err != nil {
+	if resp, err = jd.downloader.Do(req); err != nil {
 		clog.Info("请求登录页失败: %+v", err)
 		return err
 	}
@@ -108,7 +108,7 @@ func (jd *JingDong) loadQRCode(URL string) (string, error) {
 	}
 
 	applyCustomHeader(req, DefaultHeaders)
-	if resp, err = jd.client.Do(req); err != nil {
+	if resp, err = jd.downloader.Do(req); err != nil {
 		clog.Error(0, "下载二维码失败: %+v", err)
 		return "", err
 	}
@@ -178,7 +178,7 @@ func (jd *JingDong) waitForScan(URL string) error {
 	applyCustomHeader(req, DefaultHeaders)
 
 	for retry := 50; retry != 0; retry-- {
-		if resp, err = jd.client.Do(req); err != nil {
+		if resp, err = jd.downloader.Do(req); err != nil {
 			clog.Info("二维码失效：%+v", err)
 			break
 		}
@@ -239,7 +239,7 @@ func (jd *JingDong) validateQRToken(URL string) error {
 		return err
 	}
 
-	if resp, err = jd.client.Do(req); err != nil {
+	if resp, err = jd.downloader.Do(req); err != nil {
 		clog.Error(0, "二维码登陆校验失败: %+v", err)
 		return nil
 	}

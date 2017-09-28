@@ -19,7 +19,7 @@ import (
 )
 
 func (jd *JingDong) GetSkuIds(cat string, page int) error {
-	data, err := jd.getResponse("GET", URLCatList, func(URL string) string {
+	data, err := jd.downloader.GetResponse("GET", URLCatList, func(URL string) string {
 		u, _ := url.Parse(URLCatList)
 		q := u.Query()
 		q.Set("cat", cat)
@@ -49,7 +49,7 @@ func (jd *JingDong) GetSkuIds(cat string, page int) error {
 //  [{"id":"J_5105046","p":"1999.00","m":"9999.00","op":"1999.00","tpp":"1949.00"}]
 //
 func (jd *JingDong) getPrice(ID string) (string, error) {
-	data, err := jd.getResponse("GET", URLGoodsPrice, func(URL string) string {
+	data, err := jd.downloader.GetResponse("GET", URLGoodsPrice, func(URL string) string {
 		u, _ := url.Parse(URLGoodsPrice)
 		q := u.Query()
 		q.Set("type", "1")
@@ -83,7 +83,7 @@ func (jd *JingDong) getPrice(ID string) (string, error) {
 //	"channel":1,"StockStateName":"现货","rid":null,"rfg":0,"ArrivalDate":"",
 //  "IsPurchase":true,"rn":-1}}
 func (jd *JingDong) stockState(ID string) (string, string, error) {
-	data, err := jd.getResponse("GET", URLSKUState, func(URL string) string {
+	data, err := jd.downloader.GetResponse("GET", URLSKUState, func(URL string) string {
 		u, _ := url.Parse(URL)
 		q := u.Query()
 		q.Set("type", "getstocks")
@@ -131,7 +131,7 @@ func (jd *JingDong) skuDetail(ID string) (*SKUInfo, error) {
 	// response context encoding by GBK
 	//
 	itemURL := fmt.Sprintf("http://item.jd.com/%s.html", ID)
-	data, err := jd.getResponse("GET", itemURL, nil)
+	data, err := jd.downloader.GetResponse("GET", itemURL, nil)
 	if err != nil {
 		clog.Error(0, "获取商品页面失败: %+v", err)
 		return nil, err
@@ -159,7 +159,7 @@ func (jd *JingDong) skuDetail(ID string) (*SKUInfo, error) {
 	g.Price, _ = jd.getPrice(ID)
 	g.State, g.StateName, _ = jd.stockState(ID)
 
-	info := fmt.Sprintf("编号: %s, 库存: %s, 价格: %s, 链接: %s", g.ID, g.StateName, g.Price, g.Link)
+	info := fmt.Sprintf("编号: %s, 库存: %s, 价格: %s, 名称: %s, 链接: %s", g.ID, g.StateName, g.Price, g.Name, g.Link)
 	clog.Info(info)
 
 	return g, nil
@@ -180,14 +180,16 @@ func (jd *JingDong) getDetail(id int) {
 		clog.Info("get info for %s", skuId)
 		if _, err := jd.skuDetail(skuId); err != nil {
 			clog.Info("error ...")
+		} else {
+
 		}
 	}
 	clog.Info("Worker %d exit", id)
 }
 
 func (jd *JingDong) GetDetails(threads int) {
-	for i := 1; i < threads; i++ {
+	for i := 0; i < threads; i++ {
 		go jd.getDetail(i)
 	}
-	jd.getDetail(threads)
+
 }

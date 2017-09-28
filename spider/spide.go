@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Adyzng/go-jd/core"
+	"github.com/Bulusideng/go-jd/core"
 	clog "gopkg.in/clog.v1"
 )
 
@@ -20,6 +20,7 @@ func init() {
 		fmt.Printf("init console log failed. error %+v.", err)
 		os.Exit(1)
 	}
+	createJD()
 }
 
 const (
@@ -31,6 +32,7 @@ var (
 	period = flag.Int("period", 500, "the refresh period when out of stock, unit: ms.")
 	rush   = flag.Bool("rush", false, "continue to refresh when out of stock.")
 	order  = flag.Bool("order", false, "submit the order to JingDong when get the Goods.")
+	cat    = flag.String("MobilePhone", "9987,653,655", "product category.")
 	goods  = flag.String("goods", "1482791", `the goods you want to by, find it from JD website. 
 	Single Goods:
 	  2567304(:1)
@@ -38,29 +40,32 @@ var (
 	  2567304(:1),3133851(:2)`)
 )
 
-func main() {
+var jd *core.JingDong
+
+func createJD() {
 	flag.Parse()
-	defer clog.Shutdown()
 
 	gs := parseGoods(*goods)
 	clog.Trace("[Area: %+v, Goods: %qv, Period: %+v, Rush: %+v, Order: %+v]",
 		*area, gs, *period, *rush, *order)
 
-	jd := core.NewJingDong(core.JDConfig{
+	jd = core.NewJingDong(core.JDConfig{
 		Period:     time.Millisecond * time.Duration(*period),
 		ShipArea:   *area,
 		AutoRush:   *rush,
 		AutoSubmit: *order,
-	})
+	}, "shouji")
 
-	defer jd.Release()
+	/*
+		defer jd.Release()
+			//jd.GetGoodInfo()
+			for pg := 1; pg < 10; pg++ {
+				jd.GetSkuIds("9987,653,655", pg)
+			}
 
-	//jd.GetGoodInfo()
-	for pg := 1; pg < 10; pg++ {
-		jd.GetSkuIds("9987,653,655", pg)
-	}
+			close(jd.SkuIds)
 
-	close(jd.SkuIds)
+	*/
 	jd.GetDetails(10)
 
 }

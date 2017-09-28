@@ -7,20 +7,17 @@ import (
 	"io"
 	"io/ioutil"
 	"math/rand"
-	"mime"
+
 	"net/http"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
+
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/axgle/mahonia"
+
 	sjson "github.com/bitly/go-simplejson"
 	clog "gopkg.in/clog.v1"
 )
@@ -35,6 +32,7 @@ const (
 	URLCartInfo    = "https://cart.jd.com/cart.action"
 	URLOrderInfo   = "http://trade.jd.com/shopping/order/getOrderInfo.action"
 	URLSubmitOrder = "http://trade.jd.com/shopping/order/submitOrder.action"
+	URLCatList     = "https://list.jd.com/list.html"
 )
 
 var (
@@ -72,28 +70,33 @@ type JDConfig struct {
 
 // SKUInfo ...
 type SKUInfo struct {
-	ID        string
-	Price     string
-	Count     int    // buying count
-	State     string // stock state 33 : on sale, 34 : out of stock
-	StateName string // "现货" / "无货"
-	Name      string
-	Link      string
+	ID         string
+	Price      string
+	Count      int    // buying count
+	State      string // stock state 33 : on sale, 34 : out of stock
+	StateName  string // "现货" / "无货"
+	Name       string
+	Link       string
+	HistPrices string //p1,p2,p3
 }
 
 // JingDong wrap jing dong operation
 type JingDong struct {
 	JDConfig
-	client *http.Client
-	jar    *SimpleJar
-	token  string
+	downloader *Downloader
+	jar        *SimpleJar
+	token      string
+	itemType   string
+	SkuIds     chan string
 }
 
 // NewJingDong create an object to wrap JingDong related operation
 //
-func NewJingDong(option JDConfig) *JingDong {
+func NewJingDong(option JDConfig, itemType string) *JingDong {
 	jd := &JingDong{
 		JDConfig: option,
+		itemType: itemType,
+		SkuIds:   make(chan string, 10000),
 	}
 
 	jd.jar = NewSimpleJar(JarOption{
@@ -106,9 +109,11 @@ func NewJingDong(option JDConfig) *JingDong {
 		jd.jar.Clean()
 	}
 
-	jd.client = &http.Client{
-		Timeout: time.Minute,
-		Jar:     jd.jar,
+	jd.downloader = &Downloader{
+		&http.Client{
+			Timeout: time.Second * 5,
+			Jar:     jd.jar,
+		},
 	}
 
 	return jd
@@ -172,296 +177,6 @@ func applyCustomHeader(req *http.Request, header map[string]string) {
 	}
 }
 
-//
-func (jd *JingDong) validateLogin(URL string) bool {
-	var (
-		err  error
-		req  *http.Request
-		resp *http.Response
-	)
-
-	if req, err = http.NewRequest("GET", URL, nil); err != nil {
-		clog.Info("请求（%+v）失败: %+v", URL, err)
-		return false
-	}
-
-	jd.client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		// disable redirect
-		return http.ErrUseLastResponse
-	}
-
-	defer func() {
-		// restore to default
-		jd.client.CheckRedirect = nil
-	}()
-
-	if resp, err = jd.client.Do(req); err != nil {
-		clog.Info("需要重新登录: %+v", err)
-		return false
-	}
-
-	defer resp.Body.Close()
-	data, _ := ioutil.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		clog.Info("需要重新登录")
-		return false
-	}
-
-	clog.Trace("Response Data: %s", string(data))
-	return true
-}
-
-// load the login page
-//
-func (jd *JingDong) loginPage(URL string) error {
-	var (
-		err  error
-		req  *http.Request
-		resp *http.Response
-	)
-
-	if req, err = http.NewRequest("GET", URL, nil); err != nil {
-		clog.Info("请求（%+v）失败: %+v", URL, err)
-		return err
-	}
-
-	applyCustomHeader(req, DefaultHeaders)
-
-	if resp, err = jd.client.Do(req); err != nil {
-		clog.Info("请求登录页失败: %+v", err)
-		return err
-	}
-
-	defer resp.Body.Close()
-	return nil
-}
-
-// download the QR Code
-//
-func (jd *JingDong) loadQRCode(URL string) (string, error) {
-	var (
-		err  error
-		req  *http.Request
-		resp *http.Response
-	)
-
-	u, _ := url.Parse(URL)
-	q := u.Query()
-	q.Set("appid", strconv.Itoa(133))
-	q.Set("size", strconv.Itoa(147))
-	q.Set("t", strconv.FormatInt(time.Now().Unix()*1000, 10))
-	u.RawQuery = q.Encode()
-
-	if req, err = http.NewRequest("GET", u.String(), nil); err != nil {
-		clog.Error(0, "请求（%+v）失败: %+v", URL, err)
-		return "", err
-	}
-
-	applyCustomHeader(req, DefaultHeaders)
-	if resp, err = jd.client.Do(req); err != nil {
-		clog.Error(0, "下载二维码失败: %+v", err)
-		return "", err
-	}
-
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		clog.Error(0, "http status : %d/%s", resp.StatusCode, resp.Status)
-	}
-
-	// from mime get QRCode image type
-	//  content-type:image/png
-	//
-	filename := qrCodeFile + ".png"
-	mt, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if typ, e := mime.ExtensionsByType(mt); e == nil {
-		filename = qrCodeFile + typ[0]
-	}
-
-	dir, _ := os.Getwd()
-	filename = filepath.Join(dir, filename)
-	clog.Trace("QR Image: %s", filename)
-
-	file, _ := os.Create(filename)
-	defer file.Close()
-
-	if _, err = io.Copy(file, resp.Body); err != nil {
-		clog.Error(0, "下载二维码失败: %+v", err)
-		return "", err
-	}
-
-	return filename, nil
-}
-
-// wait scan result
-//
-func (jd *JingDong) waitForScan(URL string) error {
-	var (
-		err    error
-		req    *http.Request
-		resp   *http.Response
-		wlfstk string
-	)
-
-	for _, c := range jd.jar.Cookies(nil) {
-		if c.Name == "wlfstk_smdl" {
-			wlfstk = c.Value
-			break
-		}
-	}
-
-	u, _ := url.Parse(URL)
-	q := u.Query()
-	q.Set("callback", "jQuery123456")
-	q.Set("appid", strconv.Itoa(133))
-	q.Set("token", wlfstk)
-	q.Set("_", strconv.FormatInt(time.Now().Unix()*1000, 10))
-	u.RawQuery = q.Encode()
-
-	if req, err = http.NewRequest("GET", u.String(), nil); err != nil {
-		clog.Info("请求（%+v）失败: %+v", URL, err)
-		return err
-	}
-
-	// mush have
-	req.Host = "qr.m.jd.com"
-	req.Header.Set("Referer", "https://passport.jd.com/new/login.aspx")
-	applyCustomHeader(req, DefaultHeaders)
-
-	for retry := 50; retry != 0; retry-- {
-		if resp, err = jd.client.Do(req); err != nil {
-			clog.Info("二维码失效：%+v", err)
-			break
-		}
-
-		if resp.StatusCode == http.StatusOK {
-			respMsg := string(responseData(resp))
-			resp.Body.Close()
-
-			n1 := strings.Index(respMsg, "(")
-			n2 := strings.Index(respMsg, ")")
-
-			var js *sjson.Json
-			if js, err = sjson.NewJson([]byte(respMsg[n1+1 : n2])); err != nil {
-				clog.Error(0, "解析响应数据失败: %+v", err)
-				clog.Trace("Response data  : %+v", respMsg)
-				clog.Trace("Response Header: %+v", resp.Header)
-				break
-			}
-
-			code := js.Get("code").MustInt()
-			if code == 200 {
-				jd.token = js.Get("ticket").MustString()
-				clog.Info("token : %+v", jd.token)
-				break
-			} else {
-				clog.Info("%+v : %s", code, js.Get("msg").MustString())
-				time.Sleep(time.Second * 3)
-			}
-		} else {
-			resp.Body.Close()
-		}
-	}
-
-	if jd.token == "" {
-		err = fmt.Errorf("未检测到QR扫码结果")
-		return err
-	}
-
-	return nil
-}
-
-// validate QR token
-//
-func (jd *JingDong) validateQRToken(URL string) error {
-	var (
-		err  error
-		req  *http.Request
-		resp *http.Response
-	)
-
-	u, _ := url.Parse(URL)
-	q := u.Query()
-	q.Set("t", jd.token)
-	u.RawQuery = q.Encode()
-
-	if req, err = http.NewRequest("GET", u.String(), nil); err != nil {
-		clog.Info("请求（%+v）失败: %+v", URL, err)
-		return err
-	}
-
-	if resp, err = jd.client.Do(req); err != nil {
-		clog.Error(0, "二维码登陆校验失败: %+v", err)
-		return nil
-	}
-
-	if resp.StatusCode == http.StatusOK {
-		clog.Info("登陆成功, P3P: %s", resp.Header.Get("P3P"))
-	} else {
-		clog.Info("登陆失败")
-		err = fmt.Errorf("%+v", resp.Status)
-	}
-
-	resp.Body.Close()
-	return nil
-}
-
-// Login used to login JD by QR code.
-// if the cookies file exits, will try cookies first.
-//
-func (jd *JingDong) Login(args ...interface{}) error {
-	clog.Info(strSeperater)
-
-	if jd.validateLogin(URLForQR[4]) {
-		clog.Info("无需重新登录")
-		return nil
-	}
-
-	var (
-		err   error
-		qrImg string
-	)
-
-	clog.Info("请打开京东手机客户端，准备扫码登陆:")
-	jd.jar.Clean()
-
-	if err = jd.loginPage(URLForQR[0]); err != nil {
-		return err
-	}
-
-	if qrImg, err = jd.loadQRCode(URLForQR[1]); err != nil {
-		return err
-	}
-
-	// for different platform
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("explorer", qrImg)
-	case "linux":
-		cmd = exec.Command("gnome-open", qrImg)
-	default:
-		cmd = exec.Command("open", qrImg)
-	}
-
-	// just start, do not wait it complete
-	if err = cmd.Start(); err != nil {
-		clog.Info("打开二维码图片失败: %+v.", err)
-		return err
-	}
-
-	if err = jd.waitForScan(URLForQR[2]); err != nil {
-		return err
-	}
-
-	if err = jd.validateQRToken(URLForQR[3]); err != nil {
-		return err
-	}
-
-	//http.Post()
-	return nil
-}
-
 // CartDetails get the shopping cart details
 //
 func (jd *JingDong) CartDetails() error {
@@ -480,7 +195,7 @@ func (jd *JingDong) CartDetails() error {
 		return err
 	}
 
-	if resp, err = jd.client.Do(req); err != nil {
+	if resp, err = jd.downloader.Do(req); err != nil {
 		clog.Error(0, "获取购物车详情错误: %+v", err)
 		return err
 	}
@@ -554,7 +269,7 @@ func (jd *JingDong) OrderInfo() error {
 		return err
 	}
 
-	if resp, err = jd.client.Do(req); err != nil {
+	if resp, err = jd.downloader.Do(req); err != nil {
 		clog.Error(0, "获取订单页错误: %+v", err)
 		return err
 	}
@@ -594,7 +309,7 @@ func (jd *JingDong) SubmitOrder() (string, error) {
 	clog.Info(strSeperater)
 	clog.Info("提交订单>")
 
-	data, err := jd.getResponse("POST", URLSubmitOrder, func(URL string) string {
+	data, err := jd.downloader.GetResponse("POST", URLSubmitOrder, func(URL string) string {
 		queryString := map[string]string{
 			"overseaPurchaseCookies":             "",
 			"submitOrderParam.fp":                "",
@@ -639,165 +354,8 @@ func (jd *JingDong) SubmitOrder() (string, error) {
 	return "", fmt.Errorf("failed to submit order (%s : %s)", res, msg)
 }
 
-// wrap http get/post request
-//
-func (jd *JingDong) getResponse(method, URL string, queryFun func(URL string) string) ([]byte, error) {
-	var (
-		err  error
-		req  *http.Request
-		resp *http.Response
-	)
-
-	queryURL := URL
-	if queryFun != nil {
-		queryURL = queryFun(URL)
-	}
-
-	if req, err = http.NewRequest(method, queryURL, nil); err != nil {
-		return nil, err
-	}
-	applyCustomHeader(req, DefaultHeaders)
-
-	if resp, err = jd.client.Do(req); err != nil {
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-	var reader io.Reader
-
-	switch resp.Header.Get("Content-Encoding") {
-	case "gzip":
-		reader, _ = gzip.NewReader(resp.Body)
-	default:
-		reader = resp.Body
-	}
-
-	return ioutil.ReadAll(reader)
-}
-
-// getPrice return sku price by ID
-//
-//  [{"id":"J_5105046","p":"1999.00","m":"9999.00","op":"1999.00","tpp":"1949.00"}]
-//
-func (jd *JingDong) getPrice(ID string) (string, error) {
-	data, err := jd.getResponse("GET", URLGoodsPrice, func(URL string) string {
-		u, _ := url.Parse(URLGoodsPrice)
-		q := u.Query()
-		q.Set("type", "1")
-		q.Set("skuIds", "J_"+ID)
-		q.Set("pduid", strconv.FormatInt(time.Now().Unix()*1000, 10))
-		u.RawQuery = q.Encode()
-		return u.String()
-	})
-
-	if err != nil {
-		clog.Error(0, "获取商品（%s）价格失败: %+v", ID, err)
-		return "", err
-	}
-
-	var js *sjson.Json
-	if js, err = sjson.NewJson(data); err != nil {
-		clog.Info("Response Data: %s", data)
-		clog.Error(0, "解析响应数据失败: %+v", err)
-		return "", err
-	}
-
-	return js.GetIndex(0).Get("p").String()
-}
-
-// stockState return stock state
-// http://c0.3.cn/stock?skuId=531065&area=1_72_2799_0&cat=1,1,1&buyNum=1
-// http://c0.3.cn/stock?skuId=531065&area=1_72_2799_0&cat=1,1,1
-// https://c0.3.cn/stocks?type=getstocks&skuIds=4099139&area=1_72_2799_0&_=1499755881870
-//
-// {"3133811":{"StockState":33,"freshEdi":null,"skuState":1,"PopType":0,"sidDely":"40",
-//	"channel":1,"StockStateName":"现货","rid":null,"rfg":0,"ArrivalDate":"",
-//  "IsPurchase":true,"rn":-1}}
-func (jd *JingDong) stockState(ID string) (string, string, error) {
-	data, err := jd.getResponse("GET", URLSKUState, func(URL string) string {
-		u, _ := url.Parse(URL)
-		q := u.Query()
-		q.Set("type", "getstocks")
-		q.Set("skuIds", ID)
-		q.Set("area", jd.ShipArea)
-		q.Set("_", strconv.FormatInt(time.Now().Unix()*1000, 10))
-		//q.Set("cat", "1,1,1")
-		//q.Set("buyNum", strconv.Itoa(1))
-		u.RawQuery = q.Encode()
-		return u.String()
-	})
-
-	if err != nil {
-		clog.Error(0, "获取商品（%s）库存失败: %+v", ID, err)
-		return "", "", err
-	}
-
-	// return GBK encoding
-	dec := mahonia.NewDecoder("gbk")
-	decString := dec.ConvertString(string(data))
-	//clog.Trace(decString)
-
-	var js *sjson.Json
-	if js, err = sjson.NewJson([]byte(decString)); err != nil {
-		clog.Info("Response Data: %s", data)
-		clog.Error(0, "解析库存数据失败: %+v", err)
-		return "", "", err
-	}
-
-	//if sku, exist := js.CheckGet("stock"); exist {
-	if sku, exist := js.CheckGet(ID); exist {
-		skuState, _ := sku.Get("StockState").Int()
-		skuStateName, _ := sku.Get("StockStateName").String()
-		return strconv.Itoa(skuState), skuStateName, nil
-	}
-
-	return "", "", fmt.Errorf("无效响应数据")
-}
-
-// skuDetail get sku detail information
-//
-func (jd *JingDong) skuDetail(ID string) (*SKUInfo, error) {
-	g := &SKUInfo{ID: ID}
-
-	// response context encoding by GBK
-	//
-	itemURL := fmt.Sprintf("http://item.jd.com/%s.html", ID)
-	data, err := jd.getResponse("GET", itemURL, nil)
-	if err != nil {
-		clog.Error(0, "获取商品页面失败: %+v", err)
-		return nil, err
-	}
-
-	doc, err := goquery.NewDocumentFromReader(bytes.NewBuffer(data))
-	if err != nil {
-		clog.Error(0, "解析商品页面失败: %+v", err)
-		return nil, err
-	}
-
-	if link, exist := doc.Find("a#InitCartUrl").Attr("href"); exist {
-		g.Link = link
-		if !strings.HasPrefix(link, "https:") {
-			g.Link = "https:" + link
-		}
-	}
-
-	dec := mahonia.NewDecoder("gbk")
-	//rd := dec.NewReader()
-
-	g.Name = strings.Trim(dec.ConvertString(doc.Find("div.sku-name").Text()), " \t\n")
-	g.Name = truncate(g.Name)
-
-	g.Price, _ = jd.getPrice(ID)
-	g.State, g.StateName, _ = jd.stockState(ID)
-
-	info := fmt.Sprintf("编号: %s, 库存: %s, 价格: %s, 链接: %s", g.ID, g.StateName, g.Price, g.Link)
-	clog.Info(info)
-
-	return g, nil
-}
-
 func (jd *JingDong) changeCount(ID string, count int) (int, error) {
-	data, err := jd.getResponse("POST", URLChangeCount, func(URL string) string {
+	data, err := jd.downloader.GetResponse("POST", URLChangeCount, func(URL string) string {
 		u, _ := url.Parse(URL)
 		q := u.Query()
 		q.Set("venderId", "8888")
@@ -807,6 +365,7 @@ func (jd *JingDong) changeCount(ID string, count int) (int, error) {
 		q.Set("ptype", "1")
 		q.Set("pid", ID)
 		q.Set("pcount", strconv.Itoa(count))
+
 		q.Set("random", strconv.FormatFloat(rand.Float64(), 'f', 16, 64))
 		q.Set("locationId", jd.ShipArea)
 		u.RawQuery = q.Encode()
@@ -814,10 +373,9 @@ func (jd *JingDong) changeCount(ID string, count int) (int, error) {
 	})
 
 	if err != nil {
-		clog.Error(0, "修改商品数量失败: %+v", err)
+		clog.Error(0, "淇®鏀瑰晢鍝佹暟閲忓け璐¥: %+v", err)
 		return 0, err
 	}
-
 	js, _ := sjson.NewJson(data)
 	return js.Get("pcount").Int()
 }
@@ -858,7 +416,7 @@ func (jd *JingDong) buyGood(sku *SKUInfo) error {
 		return fmt.Errorf("无效商品购买链接<%s>", sku.Link)
 	}
 
-	if data, err = jd.getResponse("GET", sku.Link, nil); err != nil {
+	if data, err = jd.downloader.GetResponse("GET", sku.Link, nil); err != nil {
 		clog.Error(0, "商品(%s)购买失败: %+v", sku.ID, err)
 		return err
 	}
