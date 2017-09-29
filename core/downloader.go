@@ -3,10 +3,8 @@ package core
 import (
 	"compress/gzip"
 	"fmt"
-
 	"io"
 	"io/ioutil"
-
 	"net/http"
 )
 

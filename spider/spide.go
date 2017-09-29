@@ -66,7 +66,7 @@ func createJD() {
 			close(jd.SkuIds)
 
 	*/
-	jd.GetDetails(10)
+	jd.Start(10)
 
 }
 

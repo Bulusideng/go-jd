@@ -18,6 +18,25 @@ import (
 	clog "gopkg.in/clog.v1"
 )
 
+// SKUInfo ...
+type SKUInfo struct {
+	ID         string
+	Price      float64
+	PriceCnt   int
+	Count      int    // buying count
+	State      string // stock state 33 : on sale, 34 : out of stock
+	StateName  string // "现货" / "无货"
+	Name       string
+	Link       string
+	HistPrices string //p1,p2,p3
+	TimeStamp  string
+}
+
+func (s *SKUInfo) String() string {
+	return fmt.Sprintf("ID:%-12s, Price:%-6.2f, State:%-6s, Name:%-10s, HistPrices:%-50s",
+		s.ID, s.Price, s.StateName, s.Name, s.HistPrices)
+}
+
 func (jd *JingDong) GetSkuIds(cat string, page int) error {
 	data, err := jd.downloader.GetResponse("GET", URLCatList, func(URL string) string {
 		u, _ := url.Parse(URLCatList)
@@ -152,15 +171,19 @@ func (jd *JingDong) skuDetail(ID string) (*SKUInfo, error) {
 
 	dec := mahonia.NewDecoder("gbk")
 	//rd := dec.NewReader()
+	name := dec.ConvertString(doc.Find("div.sku-name").Text())
+	g.Name = strings.Trim(name, " \t\n")
+	//g.Name = truncate(g.Name)
 
-	g.Name = strings.Trim(dec.ConvertString(doc.Find("div.sku-name").Text()), " \t\n")
-	g.Name = truncate(g.Name)
-
-	g.Price, _ = jd.getPrice(ID)
+	price, _ := jd.getPrice(ID)
+	g.Price, _ = strconv.ParseFloat(price, 64)
 	g.State, g.StateName, _ = jd.stockState(ID)
 
-	info := fmt.Sprintf("编号: %s, 库存: %s, 价格: %s, 名称: %s, 链接: %s", g.ID, g.StateName, g.Price, g.Name, g.Link)
+	info := fmt.Sprintf("SKU Info 编号: %s, 库存: %s, 价格: %s, %f, 名称: %s:%s, 链接: %s",
+		g.ID, g.StateName, price, g.Price, name, g.Name, g.Link)
 	clog.Info(info)
+
+	jd.db.Update(g)
 
 	return g, nil
 }
@@ -187,7 +210,7 @@ func (jd *JingDong) getDetail(id int) {
 	clog.Info("Worker %d exit", id)
 }
 
-func (jd *JingDong) GetDetails(threads int) {
+func (jd *JingDong) Start(threads int) {
 	for i := 0; i < threads; i++ {
 		go jd.getDetail(i)
 	}

@@ -68,18 +68,6 @@ type JDConfig struct {
 	AutoSubmit bool          // whether submit the order
 }
 
-// SKUInfo ...
-type SKUInfo struct {
-	ID         string
-	Price      string
-	Count      int    // buying count
-	State      string // stock state 33 : on sale, 34 : out of stock
-	StateName  string // "现货" / "无货"
-	Name       string
-	Link       string
-	HistPrices string //p1,p2,p3
-}
-
 // JingDong wrap jing dong operation
 type JingDong struct {
 	JDConfig
@@ -88,6 +76,7 @@ type JingDong struct {
 	token      string
 	itemType   string
 	SkuIds     chan string
+	db         *DBSQLite
 }
 
 // NewJingDong create an object to wrap JingDong related operation
@@ -97,6 +86,7 @@ func NewJingDong(option JDConfig, itemType string) *JingDong {
 		JDConfig: option,
 		itemType: itemType,
 		SkuIds:   make(chan string, 10000),
+		db:       NewDB(true),
 	}
 
 	jd.jar = NewSimpleJar(JarOption{
