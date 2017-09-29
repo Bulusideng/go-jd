@@ -12,8 +12,7 @@ import (
 )
 
 var (
-	jdItems      = "jditems"
-	priceChanges = "priceChanges"
+	jdItems = "jditems"
 )
 
 type DBSQLite struct {
@@ -65,26 +64,14 @@ func (c *DBSQLite) Create(truncate bool) {
 	if err != nil {
 		fmt.Println("Create jditems error:", err.Error())
 	}
-	_, err = c.db.Exec(`CREATE TABLE IF NOT EXISTS priceChanges(
-									ID STRING PRIMARY KEY,
-									TimeStamp STRING,
-									price FLOAT64,
-									priceCnt INTEGER,
-									State STRING,
-									StateName STRING,
-									Name STRING,
-									Link STRING,
-									HistPrices STRING
-									)`)
-
-	if err != nil {
-		fmt.Println("Create priceChanges error:", err.Error())
-	}
 }
 
-func (c *DBSQLite) FindAll(tb string) []*SKUInfo {
+func (c *DBSQLite) FindAll(tb string, priceChanged bool) []*SKUInfo {
 	items := []*SKUInfo{}
 	stm := fmt.Sprintf("SELECT * FROM %s", tb)
+	if priceChanged {
+		stm += " WHERE priceCnt > 1"
+	}
 	rows, err := c.db.Query(stm)
 	if err != nil {
 		fmt.Println("Queryall error:", err.Error())
@@ -115,7 +102,6 @@ func (c *DBSQLite) FindAll(tb string) []*SKUInfo {
 }
 
 func (c *DBSQLite) Find(tb, id string) *SKUInfo {
-
 	stm := fmt.Sprintf("SELECT * FROM %s WHERE id = ?", tb)
 	rows, err := c.db.Query(stm, id)
 	if err != nil {
@@ -154,7 +140,6 @@ func (c *DBSQLite) Update(sku *SKUInfo) {
 		if sku.Price != old.Price {
 			sku.HistPrices = old.HistPrices + "," + strconv.FormatFloat(old.Price, 'f', 2, 64)
 			sku.PriceCnt++
-			c.update(priceChanges, sku)
 		}
 		c.update(jdItems, sku)
 	}

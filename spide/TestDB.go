@@ -6,11 +6,11 @@ import (
 	"github.com/Bulusideng/go-jd/core"
 )
 
-var test = true
+var test = false
 
 func TestDB() {
 	c := core.NewDB(false)
-	c.FindAll("jditems")
+	c.FindAll("jditems", false)
 	return
 	sendMail()
 	return
@@ -22,13 +22,13 @@ func TestDB() {
 	}
 	c.Update(item)
 	return
-	items := c.FindAll("jditems")
+	items := c.FindAll("jditems", false)
 
 	for _, item := range items {
 		item.Price *= 2
 		c.Update(item)
 	}
-	c.FindAll("jditems")
+	c.FindAll("jditems", false)
 
 	return
 
