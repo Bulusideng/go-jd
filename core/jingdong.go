@@ -86,7 +86,7 @@ func NewJingDong(option JDConfig, itemType string) *JingDong {
 		JDConfig: option,
 		itemType: itemType,
 		SkuIds:   make(chan string, 10000),
-		db:       NewDB(true),
+		db:       NewDB(false),
 	}
 
 	jd.jar = NewSimpleJar(JarOption{

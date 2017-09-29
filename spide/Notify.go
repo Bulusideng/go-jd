@@ -1,12 +1,19 @@
 package main
 
 import (
-	"bytes"
+	//	"bytes"
 	"log"
 	"net/smtp"
 
 	"github.com/go-gomail/gomail"
 )
+
+/*
+Name 	Address			SSL port 	Non-SSL port
+IMAP 	imap.163.com   	993			143
+SMTP	smtp.163.com	465/994		25
+POP3	pop.163.com		995			110
+*/
 
 const (
 	/*
@@ -18,38 +25,17 @@ const (
 	*/
 	host     = "smtp.163.com"
 	addr     = host + ":25"
-	mailAddr = "123@163.com"
-	pwd      = "123"
+	mailAddr = "dbiti@163.com"
+	pwd      = "oxiwangyi."
 	port     = 25 //465, 587
 
 )
 
-func dial() {
-	// Connect to the remote SMTP server.
-	c, err := smtp.Dial(addr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer c.Close()
-	// Set the sender and recipient.
-	c.Mail(mailAddr)
-	c.Rcpt(mailAddr)
-	// Send the email body.
-	wc, err := c.Data()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer wc.Close()
-	buf := bytes.NewBufferString("This is the email body.")
-	if _, err = buf.WriteTo(wc); err != nil {
-		log.Fatal(err)
-	}
+func sendMail() {
+	gomailSend("标题", "内容。。。。。", "")
+	//sendMail1()
 }
-
-func notify() {
-	//testgomail()
-	//return
-	// Set up authentication information.
+func sendMail1() {
 	auth := smtp.PlainAuth(
 		"",
 		mailAddr,
@@ -63,26 +49,31 @@ func notify() {
 		auth,
 		mailAddr,
 		[]string{mailAddr},
-		[]byte("This is the email body."),
+		[]byte("This is the email bodyasdf."),
 	)
 	if err != nil {
 		log.Fatal(err)
+	} else {
+		log.Println("Send success")
 	}
 }
 
-func testgomail() {
-
+func gomailSend(sub, body, attach string) {
 	m := gomail.NewMessage()
 	m.SetHeader("From", mailAddr)
 	m.SetHeader("To", mailAddr)
 	//m.SetAddressHeader("Cc", "dan@example.com", "Dan")
-	m.SetHeader("Subject", "Hello!")
-	m.SetBody("text/html", "Hello <b>Bob</b> and <i>Cora</i>!")
-	//m.Attach("/home/Alex/lolcat.jpg")
+	m.SetHeader("Subject", sub)
+	m.SetBody("text/html", body)
+	if len(attach) > 0 {
+		m.Attach(attach)
+	}
 
 	d := gomail.NewDialer(host, port, mailAddr, pwd)
 
 	if err := d.DialAndSend(m); err != nil {
 		panic(err)
+	} else {
+		log.Println("gmail success")
 	}
 }

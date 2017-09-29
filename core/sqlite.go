@@ -11,7 +11,10 @@ import (
 	_ "github.com/mattn/go-sqlite3" // sqlite3 dirver
 )
 
-var tableName string = "jditems"
+var (
+	jdItems      = "jditems"
+	priceChanges = "priceChanges"
+)
 
 type DBSQLite struct {
 	db *sql.DB
@@ -47,7 +50,7 @@ func (c *DBSQLite) Create(truncate bool) {
 		}
 	}
 
-	statement, err := c.db.Prepare(`CREATE TABLE IF NOT EXISTS jditems(
+	_, err := c.db.Exec(`CREATE TABLE IF NOT EXISTS jditems(
 									ID STRING PRIMARY KEY,
 									TimeStamp STRING,
 									price FLOAT64,
@@ -58,18 +61,31 @@ func (c *DBSQLite) Create(truncate bool) {
 									Link STRING,
 									HistPrices STRING
 									)`)
+
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Println("Create jditems error:", err.Error())
 	}
-	_, err = statement.Exec()
+	_, err = c.db.Exec(`CREATE TABLE IF NOT EXISTS priceChanges(
+									ID STRING PRIMARY KEY,
+									TimeStamp STRING,
+									price FLOAT64,
+									priceCnt INTEGER,
+									State STRING,
+									StateName STRING,
+									Name STRING,
+									Link STRING,
+									HistPrices STRING
+									)`)
+
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Println("Create priceChanges error:", err.Error())
 	}
 }
 
-func (c *DBSQLite) FindAll() []*SKUInfo {
+func (c *DBSQLite) FindAll(tb string) []*SKUInfo {
 	items := []*SKUInfo{}
-	rows, err := c.db.Query("SELECT * FROM jditems")
+	stm := fmt.Sprintf("SELECT * FROM %s", tb)
+	rows, err := c.db.Query(stm)
 	if err != nil {
 		fmt.Println("Queryall error:", err.Error())
 		return nil
@@ -98,8 +114,10 @@ func (c *DBSQLite) FindAll() []*SKUInfo {
 	return items
 }
 
-func (c *DBSQLite) Find(id string) *SKUInfo {
-	rows, err := c.db.Query("SELECT * FROM jditems WHERE id = ?", id)
+func (c *DBSQLite) Find(tb, id string) *SKUInfo {
+
+	stm := fmt.Sprintf("SELECT * FROM %s WHERE id = ?", tb)
+	rows, err := c.db.Query(stm, id)
 	if err != nil {
 		fmt.Println("querya error:", err.Error())
 		return nil
@@ -129,48 +147,51 @@ func (c *DBSQLite) Find(id string) *SKUInfo {
 }
 
 func (c *DBSQLite) Update(sku *SKUInfo) {
-	old := c.Find(sku.ID)
+	old := c.Find(jdItems, sku.ID)
 	if old == nil {
-		c.insert(sku)
+		c.insert(jdItems, sku)
 	} else {
 		if sku.Price != old.Price {
 			sku.HistPrices = old.HistPrices + "," + strconv.FormatFloat(old.Price, 'f', 2, 64)
 			sku.PriceCnt++
+			c.update(priceChanges, sku)
 		}
-
-		stmt, err := c.db.Prepare(`UPDATE jditems SET 
-		timeStamp = ?,
-		price = ?, 
-		priceCnt = ?,
-		state = ?,
-		stateName = ?,
-		name = ?,
-		link = ?,
-		histPrices = ?
-		WHERE id = ?`)
-
-		if err != nil {
-			log.Fatal("Update error:", err.Error())
-		}
-		result, err := stmt.Exec(
-			sku.TimeStamp,
-			sku.Price,
-			sku.PriceCnt,
-			sku.State,
-			sku.StateName,
-			sku.Name,
-			sku.Link,
-			sku.HistPrices,
-			sku.ID)
-		if err != nil {
-			fmt.Println("Update error:", err.Error())
-		}
-		affectNum, err := result.RowsAffected()
-		if err != nil {
-			fmt.Println(err.Error())
-		}
-		fmt.Println("update affect rows is ", affectNum)
+		c.update(jdItems, sku)
 	}
+}
+
+func (c *DBSQLite) update(tb string, sku *SKUInfo) {
+	stm := fmt.Sprintf(`UPDATE %s SET 
+			timeStamp = ?,
+			price = ?, 
+			priceCnt = ?,
+			state = ?,
+			stateName = ?,
+			name = ?,
+			link = ?,
+			histPrices = ?
+			WHERE id = ?`, tb)
+
+	result, err := c.db.Exec(stm,
+		sku.TimeStamp,
+		sku.Price,
+		sku.PriceCnt,
+		sku.State,
+		sku.StateName,
+		sku.Name,
+		sku.Link,
+		sku.HistPrices,
+		sku.ID)
+
+	if err != nil {
+		fmt.Printf("Update %s error:%s\n", tb, err.Error())
+	}
+	affectNum, err := result.RowsAffected()
+	if err != nil {
+		fmt.Println(err.Error())
+		fmt.Printf("UpdateR %s error:%s\n", tb, err.Error())
+	}
+	fmt.Println("update %s affect rows: %d\n", tb, affectNum)
 
 }
 
@@ -190,11 +211,12 @@ func (c *DBSQLite) Delete(id string) {
 	fmt.Println("delete affect rows is ", affectNum)
 }
 
-func (c *DBSQLite) insert(item *SKUInfo) {
-	item.TimeStamp = time.Now().Format(time.RFC3339)
-	result, err := c.db.Exec(`INSERT INTO jditems
+func (c *DBSQLite) insert(tb string, item *SKUInfo) {
+	stm := fmt.Sprintf(`INSERT INTO %s
 		(id, timeStamp, price, priceCnt, state, stateName, name, link, histPrices) 
-		values(?,?,?,?,?,?,?,?,?)`,
+		values(?,?,?,?,?,?,?,?,?)`, tb)
+	item.TimeStamp = time.Now().Format(time.RFC3339)
+	result, err := c.db.Exec(stm,
 		item.ID,
 		item.TimeStamp,
 		item.Price,

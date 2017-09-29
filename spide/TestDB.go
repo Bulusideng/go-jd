@@ -9,9 +9,12 @@ import (
 var test = true
 
 func TestDB() {
-
+	c := core.NewDB(false)
+	c.FindAll("jditems")
+	return
+	sendMail()
+	return
 	id := "100"
-	c := core.NewDB(true)
 
 	item := &core.SKUInfo{
 		ID:    id,
@@ -19,17 +22,17 @@ func TestDB() {
 	}
 	c.Update(item)
 	return
-	items := c.FindAll()
+	items := c.FindAll("jditems")
 
 	for _, item := range items {
 		item.Price *= 2
 		c.Update(item)
 	}
-	c.FindAll()
+	c.FindAll("jditems")
 
 	return
 
-	c.Find(id)
+	c.Find("jditems", id)
 
 	for i := 0; i < 10; i++ {
 		item.Price += float64(i)

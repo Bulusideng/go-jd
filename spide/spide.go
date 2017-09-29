@@ -9,18 +9,14 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
 	"time"
 
 	"github.com/Bulusideng/go-jd/core"
 	//	"github.com/axgle/mahonia"
-
+	"flag"
 	"net/http"
 
 	"github.com/PuerkitoBio/goquery"
-
-	"flag"
-
 	clog "gopkg.in/clog.v1"
 )
 
