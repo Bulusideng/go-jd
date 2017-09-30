@@ -11,7 +11,7 @@ import (
 	//clog "gopkg.in/clog.v1"
 )
 
-var test = true
+var test = false
 
 func TestDB() {
 	//models.GetItems()

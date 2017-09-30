@@ -52,10 +52,10 @@ func UpdateItem(sku *SKUInfo) (err error) {
 		}
 	}
 	cnt++
-	if cnt%100 == 0 {
-		fmt.Printf("Items updated: %d\n", cnt)
-		//GetItems()
-	}
+	//if cnt%100 == 0 {
+	fmt.Printf("Items updated: %d, %s\n", cnt, sku)
+
+	//}
 	return err
 }
 

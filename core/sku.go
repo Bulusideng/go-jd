@@ -187,7 +187,7 @@ func (jd *JingDong) getDetail(threadId int) {
 		if sku, ok = <-jd.SkuIds; !ok {
 			break //Closed
 		}
-		clog.Info("get info for %s", sku)
+		//clog.Info("get info for %s", sku)
 		if err := jd.skuDetail(sku); err != nil {
 			clog.Info("error ...")
 		} else {
@@ -198,12 +198,15 @@ func (jd *JingDong) getDetail(threadId int) {
 	clog.Info("Worker %d exit", threadId)
 }
 
-func (jd *JingDong) Run(threads int) {
+func (jd *JingDong) Start(threads int) {
 	for i := 0; i < threads; i++ {
 		go jd.getDetail(i)
 		jd.wg.Add(1)
 	}
+
+}
+
+func (jd *JingDong) Wait() {
 	jd.wg.Wait()
 	clog.Warn("JingDong exit...")
-
 }

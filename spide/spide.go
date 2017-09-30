@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Bulusideng/go-jd/core"
@@ -40,11 +41,11 @@ var (
 
 type CatSpider struct {
 	*core.Downloader
-	chanCat    chan *Category
-	exit       chan int
-	ThreadChan chan int
-	threadCnt  int
-	jd         *core.JingDong
+	chanCat   chan *Category
+	exit      chan int
+	wg        sync.WaitGroup
+	threadCnt int
+	jd        *core.JingDong
 }
 
 type Category struct {
@@ -58,10 +59,9 @@ func NewCatSpider(threadcnt int) *CatSpider {
 		Downloader: &core.Downloader{
 			&http.Client{},
 		},
-		chanCat:    make(chan *Category, 1000),
-		ThreadChan: make(chan int, threadcnt),
-		exit:       make(chan int, 1),
-		threadCnt:  threadcnt,
+		chanCat:   make(chan *Category, 1000),
+		exit:      make(chan int, 1),
+		threadCnt: threadcnt,
 		jd: core.NewJingDong(core.JDConfig{
 			Period:     time.Millisecond * time.Duration(*period),
 			ShipArea:   *area,
@@ -100,7 +100,7 @@ func (this *Category) run() {
 				clog.Info("Found Item %s:%s", id, name)
 			}
 			if len(spider.jd.SkuIds) > 10 {
-				time.Sleep(time.Second)
+				//time.Sleep(time.Second)
 			}
 		})
 		if page >= 2 {
@@ -142,31 +142,34 @@ func (this *CatSpider) GetCatogery() {
 
 }
 
-func (this *CatSpider) run() {
-	go func() {
-		for {
-			cat, ok := <-this.chanCat
-			if !ok {
-				clog.Info("No item and closed, exit:%d", len(this.chanCat))
-				break
-			}
-			go func(s *CatSpider, cat *Category) {
-				s.ThreadChan <- 1
-				cat.run()
-				<-s.ThreadChan
-			}(this, cat)
+func (this *CatSpider) worker() {
+	this.wg.Add(1)
+	defer this.wg.Done()
+	for {
+		cat, ok := <-this.chanCat
+		if !ok {
+			return
 		}
-	}()
+		cat.run()
+	}
+}
+
+func (this *CatSpider) Start() {
+	for i := 0; i < this.threadCnt; i++ {
+		go this.worker()
+	}
 
 	this.GetCatogery()
-	clog.Info("Close cat chan...")
-	close(this.chanCat)
-	clog.Info("Waiting worker exit...")
 
-	for i := 0; i < this.threadCnt; i++ {
-		this.ThreadChan <- i
-	}
+}
+
+func (this *CatSpider) Wait() {
+	clog.Info("Close cat chan, wait cat worker exit...")
+	close(this.chanCat)
+	this.wg.Wait()
+	clog.Info("Close sku chan, wait sku worker exit...")
 	close(this.jd.SkuIds)
+	this.jd.Wait()
 	clog.Info("Spider exit...")
 }
 
@@ -190,8 +193,9 @@ func main() {
 		TestDB()
 	} else {
 		spider = NewCatSpider(1)
-		go spider.jd.Run(10)
-		spider.run()
+		spider.jd.Start(10)
+		spider.Start()
+		spider.Wait()
 		clog.Info("main exit...")
 	}
 
