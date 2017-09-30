@@ -16,8 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
+	"github.com/Bulusideng/go-jd/core/models"
 
+	"github.com/PuerkitoBio/goquery"
 	sjson "github.com/bitly/go-simplejson"
 	clog "gopkg.in/clog.v1"
 )
@@ -75,8 +76,8 @@ type JingDong struct {
 	jar        *SimpleJar
 	token      string
 	itemType   string
-	SkuIds     chan string
-	db         *DBSQLite
+	SkuIds     chan *models.SKUInfo
+	wg         sync.WaitGroup
 }
 
 // NewJingDong create an object to wrap JingDong related operation
@@ -85,8 +86,7 @@ func NewJingDong(option JDConfig, itemType string) *JingDong {
 	jd := &JingDong{
 		JDConfig: option,
 		itemType: itemType,
-		SkuIds:   make(chan string, 10000),
-		db:       NewDB(false),
+		SkuIds:   make(chan *models.SKUInfo, 1000),
 	}
 
 	jd.jar = NewSimpleJar(JarOption{
@@ -370,7 +370,7 @@ func (jd *JingDong) changeCount(ID string, count int) (int, error) {
 	return js.Get("pcount").Int()
 }
 
-func (jd *JingDong) buyGood(sku *SKUInfo) error {
+func (jd *JingDong) buyGood(sku *models.SKUInfo) error {
 	var (
 		err  error
 		data []byte
@@ -444,7 +444,8 @@ func (jd *JingDong) RushBuy(skuLst map[string]int) {
 		wg.Add(1)
 		go func(id string, count int) {
 			defer wg.Done()
-			if sku, err := jd.skuDetail(id); err == nil {
+			sku := &models.SKUInfo{}
+			if err := jd.skuDetail(sku); err == nil {
 				sku.Count = count
 				jd.buyGood(sku)
 			}

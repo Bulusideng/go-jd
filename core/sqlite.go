@@ -8,6 +8,7 @@ import (
 
 	"log"
 
+	"github.com/Bulusideng/go-jd/core/models"
 	_ "github.com/mattn/go-sqlite3" // sqlite3 dirver
 )
 
@@ -66,8 +67,8 @@ func (c *DBSQLite) Create(truncate bool) {
 	}
 }
 
-func (c *DBSQLite) FindAll(tb string, priceChanged bool) []*SKUInfo {
-	items := []*SKUInfo{}
+func (c *DBSQLite) FindAll(tb string, priceChanged bool) []*models.SKUInfo {
+	items := []*models.SKUInfo{}
 	stm := fmt.Sprintf("SELECT * FROM %s", tb)
 	if priceChanged {
 		stm += " WHERE priceCnt > 1"
@@ -80,7 +81,7 @@ func (c *DBSQLite) FindAll(tb string, priceChanged bool) []*SKUInfo {
 	defer rows.Close()
 
 	for rows.Next() {
-		item := &SKUInfo{}
+		item := &models.SKUInfo{}
 		err := rows.Scan(
 			&item.ID,
 			&item.TimeStamp,
@@ -101,7 +102,7 @@ func (c *DBSQLite) FindAll(tb string, priceChanged bool) []*SKUInfo {
 	return items
 }
 
-func (c *DBSQLite) Find(tb, id string) *SKUInfo {
+func (c *DBSQLite) Find(tb, id string) *models.SKUInfo {
 	stm := fmt.Sprintf("SELECT * FROM %s WHERE id = ?", tb)
 	rows, err := c.db.Query(stm, id)
 	if err != nil {
@@ -111,7 +112,7 @@ func (c *DBSQLite) Find(tb, id string) *SKUInfo {
 	defer rows.Close()
 
 	for rows.Next() {
-		item := &SKUInfo{}
+		item := &models.SKUInfo{}
 		err := rows.Scan(
 			&item.ID,
 			&item.TimeStamp,
@@ -132,7 +133,7 @@ func (c *DBSQLite) Find(tb, id string) *SKUInfo {
 	return nil
 }
 
-func (c *DBSQLite) Update(sku *SKUInfo) {
+func (c *DBSQLite) Update(sku *models.SKUInfo) {
 	old := c.Find(jdItems, sku.ID)
 	if old == nil {
 		c.insert(jdItems, sku)
@@ -145,7 +146,7 @@ func (c *DBSQLite) Update(sku *SKUInfo) {
 	}
 }
 
-func (c *DBSQLite) update(tb string, sku *SKUInfo) {
+func (c *DBSQLite) update(tb string, sku *models.SKUInfo) {
 	stm := fmt.Sprintf(`UPDATE %s SET 
 			timeStamp = ?,
 			price = ?, 
@@ -196,7 +197,7 @@ func (c *DBSQLite) Delete(id string) {
 	fmt.Println("delete affect rows is ", affectNum)
 }
 
-func (c *DBSQLite) insert(tb string, item *SKUInfo) {
+func (c *DBSQLite) insert(tb string, item *models.SKUInfo) {
 	stm := fmt.Sprintf(`INSERT INTO %s
 		(id, timeStamp, price, priceCnt, state, stateName, name, link, histPrices) 
 		values(?,?,?,?,?,?,?,?,?)`, tb)

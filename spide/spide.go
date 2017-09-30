@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Bulusideng/go-jd/core"
+	"github.com/Bulusideng/go-jd/core/models"
 	//	"github.com/axgle/mahonia"
 	"flag"
 	"net/http"
@@ -94,16 +95,15 @@ func (this *Category) run() {
 			cnt++
 			id, _ := s.Attr("data-sku")
 			name := strings.Trim(s.Find("div.p-name em").Text(), " \n\r\t")
-			spider.jd.SkuIds <- id
+			spider.jd.SkuIds <- &models.SKUInfo{ID: id, Name: name}
 			if true {
 				clog.Info("Found Item %s:%s", id, name)
 			}
 			if len(spider.jd.SkuIds) > 10 {
 				time.Sleep(time.Second)
 			}
-
 		})
-		if page > 0 {
+		if page >= 2 {
 			break
 		}
 	}
@@ -127,14 +127,14 @@ func (this *CatSpider) GetCatogery() {
 		if catreg.FindAllString(ref, -1) != nil {
 			cat := &Category{s.Text(), "http:" + href, 0}
 			switch cat.CatName {
-			case "手机", "电脑":
-			default:
+			case "手机", "电脑", "洗衣机", "空调", "冰箱":
 				this.chanCat <- cat
 				cats++
 				clog.Info("Add cat[%d] %s %s", cats, cat.CatName, cat.CatURL)
-				if cats > 6 {
+				if cats >= 2 {
 					return false
 				}
+			default:
 			}
 		}
 		return true
@@ -147,7 +147,7 @@ func (this *CatSpider) run() {
 		for {
 			cat, ok := <-this.chanCat
 			if !ok {
-				clog.Info("No item and closed, exit")
+				clog.Info("No item and closed, exit:%d", len(this.chanCat))
 				break
 			}
 			go func(s *CatSpider, cat *Category) {
@@ -162,10 +162,12 @@ func (this *CatSpider) run() {
 	clog.Info("Close cat chan...")
 	close(this.chanCat)
 	clog.Info("Waiting worker exit...")
+
 	for i := 0; i < this.threadCnt; i++ {
 		this.ThreadChan <- i
 	}
-	clog.Info("main exit...")
+	close(this.jd.SkuIds)
+	clog.Info("Spider exit...")
 }
 
 var spider *CatSpider
@@ -188,9 +190,9 @@ func main() {
 		TestDB()
 	} else {
 		spider = NewCatSpider(1)
-		spider.jd.Start(10)
+		go spider.jd.Run(10)
 		spider.run()
-
+		clog.Info("main exit...")
 	}
 
 }

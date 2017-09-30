@@ -12,30 +12,12 @@ import (
 
 	"time"
 
+	"github.com/Bulusideng/go-jd/core/models"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/axgle/mahonia"
 	sjson "github.com/bitly/go-simplejson"
 	clog "gopkg.in/clog.v1"
 )
-
-// SKUInfo ...
-type SKUInfo struct {
-	ID         string
-	Price      float64
-	PriceCnt   int
-	Count      int    // buying count
-	State      string // stock state 33 : on sale, 34 : out of stock
-	StateName  string // "现货" / "无货"
-	Name       string
-	Link       string
-	HistPrices string //p1,p2,p3
-	TimeStamp  string
-}
-
-func (s *SKUInfo) String() string {
-	return fmt.Sprintf("ID:%-12s, Price:%-6.2f, State:%-6s, Name:%-10s, HistPrices:%-50s",
-		s.ID, s.Price, s.StateName, s.Name, s.HistPrices)
-}
 
 func (jd *JingDong) GetSkuIds(cat string, page int) error {
 	data, err := jd.downloader.GetResponse("GET", URLCatList, func(URL string) string {
@@ -53,11 +35,11 @@ func (jd *JingDong) GetSkuIds(cat string, page int) error {
 		return err
 	}
 	doc.Find("div.gl-i-wrap.j-sku-item").Each(func(i int, s *goquery.Selection) {
+		sku := &models.SKUInfo{}
 		id, _ := s.Attr("data-sku")
-		clog.Info("item:%s", id)
-		//jd.getPrice(id)
-		//skuIds = append(skuIds, id)
-		jd.SkuIds <- id
+		name := s.Find("div.p-name a em").Text()
+		clog.Info("item:%s: %s", id, name)
+		jd.SkuIds <- sku
 
 	})
 	return nil
@@ -144,22 +126,21 @@ func (jd *JingDong) stockState(ID string) (string, string, error) {
 
 // skuDetail get sku detail information
 //
-func (jd *JingDong) skuDetail(ID string) (*SKUInfo, error) {
-	g := &SKUInfo{ID: ID}
+func (jd *JingDong) skuDetail(g *models.SKUInfo) error {
 
 	// response context encoding by GBK
 	//
-	itemURL := fmt.Sprintf("http://item.jd.com/%s.html", ID)
+	itemURL := fmt.Sprintf("http://item.jd.com/%s.html", g.ID)
 	data, err := jd.downloader.GetResponse("GET", itemURL, nil)
 	if err != nil {
 		clog.Error(0, "获取商品页面失败: %+v", err)
-		return nil, err
+		return err
 	}
 
 	doc, err := goquery.NewDocumentFromReader(bytes.NewBuffer(data))
 	if err != nil {
 		clog.Error(0, "解析商品页面失败: %+v", err)
-		return nil, err
+		return err
 	}
 
 	if link, exist := doc.Find("a#InitCartUrl").Attr("href"); exist {
@@ -172,47 +153,57 @@ func (jd *JingDong) skuDetail(ID string) (*SKUInfo, error) {
 	dec := mahonia.NewDecoder("gbk")
 	//rd := dec.NewReader()
 	name := dec.ConvertString(doc.Find("div.sku-name").Text())
+	if len(name) == 0 {
+		name = dec.ConvertString(doc.Find("div#name h1").Text())
+	}
 	g.Name = strings.Trim(name, " \t\n")
 	//g.Name = truncate(g.Name)
 
-	price, _ := jd.getPrice(ID)
+	price, _ := jd.getPrice(g.ID)
 	g.Price, _ = strconv.ParseFloat(price, 64)
-	g.State, g.StateName, _ = jd.stockState(ID)
+	g.State, g.StateName, _ = jd.stockState(g.ID)
 
-	info := fmt.Sprintf("SKU Info 编号: %s, 库存: %s, 价格: %s, %f, 名称: %s:%s, 链接: %s",
-		g.ID, g.StateName, price, g.Price, name, g.Name, g.Link)
+	info := fmt.Sprintf("SKU Info 编号: %s, 库存: %s, 价格: %s, 名称: %s, 链接: %s",
+		g.ID, g.StateName, price, g.Name, g.Link)
 	clog.Info(info)
 
-	jd.db.Update(g)
-
-	return g, nil
+	return nil
 }
 
 func (jd *JingDong) GetPrices() {
-	for skuId := range jd.SkuIds {
-		if p, err := jd.getPrice(skuId); err != nil {
+	for sku := range jd.SkuIds {
+		if p, err := jd.getPrice(sku.ID); err != nil {
 			clog.Info("error ...")
 		} else {
-			clog.Info("%s, price:%s", skuId, p)
+			clog.Info("%s, price:%s", sku.ID, p)
 		}
 	}
 }
-func (jd *JingDong) getDetail(id int) {
-	clog.Info("Worker %d start", id)
-	for skuId := range jd.SkuIds {
-		clog.Info("get info for %s", skuId)
-		if _, err := jd.skuDetail(skuId); err != nil {
+func (jd *JingDong) getDetail(threadId int) {
+	clog.Info("Worker %d start", threadId)
+	var sku *models.SKUInfo
+	var ok bool
+	for {
+		if sku, ok = <-jd.SkuIds; !ok {
+			break //Closed
+		}
+		clog.Info("get info for %s", sku)
+		if err := jd.skuDetail(sku); err != nil {
 			clog.Info("error ...")
 		} else {
-
+			models.UpdateItem(sku)
 		}
 	}
-	clog.Info("Worker %d exit", id)
+	jd.wg.Done()
+	clog.Info("Worker %d exit", threadId)
 }
 
-func (jd *JingDong) Start(threads int) {
+func (jd *JingDong) Run(threads int) {
 	for i := 0; i < threads; i++ {
 		go jd.getDetail(i)
+		jd.wg.Add(1)
 	}
+	jd.wg.Wait()
+	clog.Warn("JingDong exit...")
 
 }
